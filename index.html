@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PuntoDeVista — Fotografía Colaborativa</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.75); }
+      70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(255, 255, 255, 0); }
+      100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
+    }
+    .pin-pulse { animation: pulse-ring 2s infinite; }
+  </style>
+</head>
+<body class="bg-neutral-950 text-neutral-100 min-h-screen flex flex-col font-sans antialiased">
+
+  <!-- Barra superior -->
+  <header class="border-b border-neutral-800 px-5 py-4 flex flex-wrap items-center justify-between gap-4 bg-neutral-900/80 backdrop-blur sticky top-0 z-30">
+    <div class="flex items-center gap-3">
+      <span class="w-3 h-3 rounded-full bg-emerald-400 inline-block"></span>
+      <a href="./" class="font-semibold tracking-tight text-lg hover:text-emerald-400 transition">PuntoDeVista</a>
+    </div>
+
+    <div id="controles-foto" class="hidden flex flex-wrap items-center gap-3">
+      <!-- Switch Vista Original vs Comentada -->
+      <div class="bg-neutral-800 p-1 rounded-lg flex text-xs sm:text-sm">
+        <button id="btn-vista-comentada" class="px-3 py-1.5 rounded-md bg-neutral-100 text-neutral-900 font-medium transition">
+          Vista comentada
+        </button>
+        <button id="btn-vista-original" class="px-3 py-1.5 rounded-md text-neutral-400 hover:text-white transition">
+          Vista original
+        </button>
+      </div>
+
+      <button id="btn-compartir" class="bg-emerald-500 hover:bg-emerald-400 text-neutral-950 font-medium text-xs sm:text-sm px-4 py-2 rounded-lg transition">
+        Copiar enlace
+      </button>
+      <a href="./" class="text-xs text-neutral-400 hover:text-white underline ml-1">Subir otra</a>
+    </div>
+  </header>
+
+  <!-- Contenido principal -->
+  <main class="flex-1 flex items-center justify-center p-4 sm:p-6">
+    
+    <!-- Pantalla 1: Subir fotografía -->
+    <section id="vista-subida" class="max-w-md w-full border-2 border-dashed border-neutral-700 rounded-2xl p-8 sm:p-10 text-center hover:border-neutral-500 transition bg-neutral-900/40">
+      <p class="text-lg font-medium mb-2">Sube una fotografía para compartir</p>
+      <p class="text-sm text-neutral-400 mb-6 leading-relaxed">
+        Cada persona que abra el enlace podrá hacer clic en cualquier lugar de la imagen y dejar <strong class="text-neutral-200">un único comentario</strong>.
+      </p>
+      <label class="cursor-pointer bg-white text-neutral-950 font-medium px-5 py-2.5 rounded-lg hover:bg-neutral-200 transition inline-block shadow-md">
+        Seleccionar imagen
+        <input type="file" id="input-foto" accept="image/*" class="hidden">
+      </label>
+      <p id="estado-subida" class="text-xs text-emerald-400 mt-4 hidden animate-pulse">Subiendo fotografía y generando enlace...</p>
+    </section>
+
+    <!-- Pantalla 2: Visor interactivo -->
+    <section id="vista-visor" class="hidden flex-col items-center max-w-5xl w-full">
+      <div class="flex flex-col sm:flex-row items-center justify-between w-full max-w-3xl mb-4 gap-2">
+        <p id="banner-instruccion" class="text-sm text-neutral-300 text-center sm:text-left">
+          Haz clic en cualquier lugar de la fotografía para dejar tu único comentario.
+        </p>
+        <span id="contador-pines" class="text-xs text-neutral-500 bg-neutral-900 border border-neutral-800 px-2.5 py-1 rounded-full">
+          0 comentarios
+        </span>
+      </div>
+
+      <!-- Contenedor relativo de la imagen y los pines -->
+      <div id="contenedor-imagen" class="relative inline-block max-w-full rounded-xl overflow-hidden shadow-2xl cursor-crosshair select-none bg-neutral-900">
+        <img id="imagen-principal" src="" alt="Fotografía compartida" class="max-h-[75vh] w-auto block">
+        <div id="capa-pines" class="absolute inset-0 transition-opacity duration-300"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Modal para crear el único comentario -->
+  <div id="modal-nuevo-pin" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+    <div class="bg-neutral-900 border border-neutral-800 rounded-xl p-6 max-w-sm w-full shadow-2xl">
+      <h2 class="font-semibold text-base mb-1">Dejar tu comentario</h2>
+      <p class="text-xs text-neutral-400 mb-4">Solo puedes publicar un punto en esta fotografía.</p>
+      
+      <input type="text" id="input-autor" placeholder="Tu nombre" maxlength="25"
+        class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm mb-3 focus:outline-none focus:border-emerald-400 text-white">
+      
+      <textarea id="input-texto" rows="3" placeholder="¿Qué ves o qué opinas de este punto?" maxlength="240"
+        class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm mb-3 focus:outline-none focus:border-emerald-400 text-white"></textarea>
+
+      <div class="flex items-center justify-between mb-5">
+        <span class="text-xs text-neutral-400">Color del punto:</span>
+        <div class="flex gap-2.5" id="selector-colores">
+          <button type="button" data-color="#ef4444" class="w-6 h-6 rounded-full bg-red-500 ring-2 ring-white transition"></button>
+          <button type="button" data-color="#f59e0b" class="w-6 h-6 rounded-full bg-amber-500 transition"></button>
+          <button type="button" data-color="#10b981" class="w-6 h-6 rounded-full bg-emerald-500 transition"></button>
+          <button type="button" data-color="#3b82f6" class="w-6 h-6 rounded-full bg-blue-500 transition"></button>
+          <button type="button" data-color="#ec4899" class="w-6 h-6 rounded-full bg-pink-500 transition"></button>
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-2">
+        <button id="btn-cancelar-pin" class="px-4 py-2 text-sm text-neutral-400 hover:text-white transition">Cancelar</button>
+        <button id="btn-guardar-pin" class="px-4 py-2 text-sm bg-emerald-500 text-neutral-950 font-medium rounded-lg hover:bg-emerald-400 transition">Publicar punto</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal para leer un comentario existente -->
+  <div id="modal-ver-pin" class="hidden fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+    <div class="bg-neutral-900 border border-neutral-800 rounded-xl p-5 max-w-sm w-full shadow-2xl">
+      <div class="flex items-center gap-2.5 mb-2.5">
+        <span id="ver-pin-color" class="w-3.5 h-3.5 rounded-full border border-white/50"></span>
+        <strong id="ver-pin-autor" class="text-sm font-semibold text-white"></strong>
+      </div>
+      <p id="ver-pin-texto" class="text-sm text-neutral-300 leading-relaxed mb-5 whitespace-pre-wrap"></p>
+      <button id="btn-cerrar-ver" class="w-full py-2 bg-neutral-800 hover:bg-neutral-700 rounded-lg text-xs font-medium text-neutral-200 transition">Cerrar</button>
+    </div>
+  </div>
+
+  <script>
+    // Configuración de Supabase
+    const SUPABASE_URL = 'https://pwmkgciglpacpgbdawoj.supabase.co';
+    const SUPABASE_ANON_KEY = 'sb_publishable_upSNTt8yhLR5JXLLrPfZgQ_BjCS9KTj';
+    const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // Identificador único del visitante en este navegador para limitar a 1 comentario
+    let visitanteId = localStorage.getItem('pdv_visitante_id');
+    if (!visitanteId) {
+      visitanteId = crypto.randomUUID();
+      localStorage.setItem('pdv_visitante_id', visitanteId);
+    }
+
+    // Estado de la aplicación
+    const params = new URLSearchParams(window.location.search);
+    const sesionId = params.get('foto');
+    let yaComento = false;
+    let totalPines = 0;
+    let pinesRenderizados = new Set();
+    let coordPendiente = { x: 0, y: 0 };
+    let colorSeleccionado = '#ef4444';
+
+    // Elementos del DOM
+    const vistaSubida = document.getElementById('vista-subida');
+    const vistaVisor = document.getElementById('vista-visor');
+    const controlesFoto = document.getElementById('controles-foto');
+    const imgPrincipal = document.getElementById('imagen-principal');
+    const capaPines = document.getElementById('capa-pines');
+    const bannerInstruccion = document.getElementById('banner-instruccion');
+    const contadorPines = document.getElementById('contador-pines');
+
+    // Inicialización según si hay parámetro ?foto=ID en la URL
+    async function iniciar() {
+      if (!sesionId) return;
+
+      vistaSubida.classList.add('hidden');
+      vistaVisor.classList.remove('hidden');
+      vistaVisor.classList.add('flex');
+      controlesFoto.classList.remove('hidden');
+
+      const { data: sesion, error } = await db
+        .from('sesiones')
+        .select('imagen_url')
+        .eq('id', sesionId)
+        .single();
+
+      if (error || !sesion) {
+        alert('No se encontró la fotografía o el enlace es inválido.');
+        window.location.href = './';
+        return;
+      }
+
+      imgPrincipal.src = sesion.imagen_url;
+      await cargarComentarios();
+      suscribirTiempoReal();
+    }
+
+    // Subir nueva fotografía a Supabase Storage y crear sesión
+    document.getElementById('input-foto').addEventListener('change', async (e) => {
+      const archivo = e.target.files[0];
+      if (!archivo) return;
+
+      const estado = document.getElementById('estado-subida');
+      estado.classList.remove('hidden');
+
+      const extension = archivo.name.split('.').pop().toLowerCase() || 'jpg';
+      const nombreArchivo = `${crypto.randomUUID()}.${extension}`;
+
+      const { error: uploadError } = await db.storage
+        .from('fotos')
+        .upload(nombreArchivo, archivo, { contentType: archivo.type });
+
+      if (uploadError) {
+        alert('Error al subir imagen: ' + uploadError.message);
+        estado.classList.add('hidden');
+        return;
+      }
+
+      const { data: publicUrlData } = db.storage
+        .from('fotos')
+        .getPublicUrl(nombreArchivo);
+
+      const { data: nuevaSesion, error: dbError } = await db
+        .from('sesiones')
+        .insert([{ imagen_url: publicUrlData.publicUrl }])
+        .select()
+        .single();
+
+      if (dbError) {
+        alert('Error al crear la sesión: ' + dbError.message);
+        estado.classList.add('hidden');
+        return;
+      }
+
+      // Redirigir a la URL compartible
+      window.location.search = `?foto=${nuevaSesion.id}`;
+    });
+
+    // Cargar todos los puntos de la foto
+    async function cargarComentarios() {
+      const { data: comentarios } = await db
+        .from('comentarios')
+        .select('*')
+        .eq('sesion_id', sesionId)
+        .order('creado_en', { ascending: true });
+
+      capaPines.innerHTML = '';
+      pinesRenderizados.clear();
+      totalPines = 0;
+
+      if (!comentarios) return;
+
+      comentarios.forEach(c => {
+        if (c.visitante_id === visitanteId) {
+          marcarComoComentado();
+        }
+        renderizarPin(c);
+      });
+    }
+
+    // Escuchar nuevos puntos de amigos en vivo
+    function suscribirTiempoReal() {
+      db.channel(`comentarios-${sesionId}`)
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'comentarios',
+          filter: `sesion_id=eq.${sesionId}`
+        }, payload => {
+          renderizarPin(payload.new);
+        })
+        .subscribe();
+    }
+
+    function marcarComoComentado() {
+      yaComento = true;
+      bannerInstruccion.textContent = 'Ya dejaste tu punto. Haz clic sobre cualquier círculo para leer su comentario.';
+      document.getElementById('contenedor-imagen').classList.remove('cursor-crosshair');
+    }
+
+    // Dibujar un punto en coordenadas porcentuales
+    function renderizarPin(c) {
+      if (pinesRenderizados.has(c.id)) return;
+      pinesRenderizados.add(c.id);
+      totalPines++;
+      contadorPines.textContent = `${totalPines} ${totalPines === 1 ? 'comentario' : 'comentarios'}`;
+
+      const pin = document.createElement('button');
+      pin.className = 'pin-pulse absolute w-5 h-5 -ml-2.5 -mt-2.5 rounded-full border-2 border-white shadow-lg cursor-pointer transition-transform hover:scale-125 focus:outline-none';
+      pin.style.left = `${c.pos_x}%`;
+      pin.style.top = `${c.pos_y}%`;
+      pin.style.backgroundColor = c.color;
+      pin.title = `Comentario de ${c.autor}`;
+
+      pin.addEventListener('click', (e) => {
+        e.stopPropagation();
+        document.getElementById('ver-pin-color').style.backgroundColor = c.color;
+        document.getElementById('ver-pin-autor').textContent = c.autor;
+        document.getElementById('ver-pin-texto').textContent = c.texto;
+        document.getElementById('modal-ver-pin').classList.remove('hidden');
+      });
+
+      capaPines.appendChild(pin);
+    }
+
+    // Clic sobre la imagen para colocar el único comentario
+    document.getElementById('contenedor-imagen').addEventListener('click', (e) => {
+      if (yaComento) return;
+      if (capaPines.classList.contains('opacity-0')) return;
+
+      const rect = imgPrincipal.getBoundingClientRect();
+      coordPendiente.x = (((e.clientX - rect.left) / rect.width) * 100).toFixed(2);
+      coordPendiente.y = (((e.clientY - rect.top) / rect.height) * 100).toFixed(2);
+
+      document.getElementById('modal-nuevo-pin').classList.remove('hidden');
+      document.getElementById('input-autor').focus();
+    });
+
+    // Selector de color
+    document.querySelectorAll('#selector-colores button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#selector-colores button').forEach(b => b.classList.remove('ring-2', 'ring-white'));
+        btn.classList.add('ring-2', 'ring-white');
+        colorSeleccionado = btn.dataset.color;
+      });
+    });
+
+    // Guardar el comentario en Supabase
+    document.getElementById('btn-guardar-pin').addEventListener('click', async () => {
+      const btnGuardar = document.getElementById('btn-guardar-pin');
+      const autor = document.getElementById('input-autor').value.trim() || 'Anónimo';
+      const texto = document.getElementById('input-texto').value.trim();
+      if (!texto) {
+        document.getElementById('input-texto').focus();
+        return;
+      }
+
+      btnGuardar.disabled = true;
+      btnGuardar.textContent = 'Guardando...';
+
+      const { data, error } = await db.from('comentarios').insert([{
+        sesion_id: sesionId,
+        visitante_id: visitanteId,
+        autor,
+        texto,
+        color: colorSeleccionado,
+        pos_x: coordPendiente.x,
+        pos_y: coordPendiente.y
+      }]).select().single();
+
+      btnGuardar.disabled = false;
+      btnGuardar.textContent = 'Publicar punto';
+
+      if (error) {
+        if (error.code === '23505') {
+          alert('Ya habías registrado un comentario en esta fotografía.');
+          marcarComoComentado();
+          document.getElementById('modal-nuevo-pin').classList.add('hidden');
+        } else {
+          alert('No se pudo guardar: ' + error.message);
+        }
+        return;
+      }
+
+      marcarComoComentado();
+      if (data) renderizarPin(data);
+      document.getElementById('modal-nuevo-pin').classList.add('hidden');
+    });
+
+    // Botones de alternancia: Vista comentada vs Vista original
+    const btnComentada = document.getElementById('btn-vista-comentada');
+    const btnOriginal = document.getElementById('btn-vista-original');
+
+    btnOriginal.addEventListener('click', () => {
+      capaPines.classList.add('opacity-0', 'pointer-events-none');
+      btnOriginal.className = 'px-3 py-1.5 rounded-md bg-neutral-100 text-neutral-900 font-medium transition';
+      btnComentada.className = 'px-3 py-1.5 rounded-md text-neutral-400 hover:text-white transition';
+    });
+
+    btnComentada.addEventListener('click', () => {
+      capaPines.classList.remove('opacity-0', 'pointer-events-none');
+      btnComentada.className = 'px-3 py-1.5 rounded-md bg-neutral-100 text-neutral-900 font-medium transition';
+      btnOriginal.className = 'px-3 py-1.5 rounded-md text-neutral-400 hover:text-white transition';
+    });
+
+    // Cerrar modales y copiar enlace
+    document.getElementById('btn-cancelar-pin').addEventListener('click', () => {
+      document.getElementById('modal-nuevo-pin').classList.add('hidden');
+    });
+    document.getElementById('btn-cerrar-ver').addEventListener('click', () => {
+      document.getElementById('modal-ver-pin').classList.add('hidden');
+    });
+    document.getElementById('btn-compartir').addEventListener('click', () => {
+      navigator.clipboard.writeText(window.location.href);
+      const btn = document.getElementById('btn-compartir');
+      btn.textContent = '¡Enlace copiado!';
+      setTimeout(() => btn.textContent = 'Copiar enlace', 2000);
+    });
+
+    iniciar();
+  </script>
+</body>
+</html>
